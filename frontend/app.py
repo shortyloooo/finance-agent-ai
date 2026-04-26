@@ -1,9 +1,22 @@
 import streamlit as st
+from database.supabase_client import supabase
 
 st.set_page_config(page_title="Finance AI Agent", page_icon=":sparkles:", layout="centered")
 
 st.title("Finance AI Agent")
 st.write("Welcome to the Finance AI Agent! This application allows you to interact with an AI agent that can assist you with various financial tasks. You can ask questions, get insights, and receive recommendations related to finance.")
+
+st.write("Gettting Transactions from Supabase Database...")
+
+response = supabase.table("transactions").select("*").execute()
+
+data = response.data
+
+if data:
+    st.write("Transactions from Supabase:")
+    st.dataframe(data)
+else:
+    st.warning("No Data Found in Supabase Database.")
 
 uploaded_file = st.file_uploader("Upload your financial data (CSV/XLSX)", type=["csv", "xlsx"])
 
