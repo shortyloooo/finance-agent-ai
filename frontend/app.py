@@ -145,7 +145,10 @@ if st.button("Generate Budget Advice"):
         "total_expense": float(total_expense),
         "balance": float(balance),
         "category_summary": category_summary,
+        "summary_text": "",
+        "risk_flags": [],
+        "budget_plan": {},
         "advice": ""
     })
 
-    st.write(result["advice"])
+    st.markdown(result["advice"])
