@@ -179,6 +179,31 @@ if page == "Dashboard":
             (db_df["transaction_date"].dt.date >= start_date) &
             (db_df["transaction_date"].dt.date <= end_date)
         ]
+        
+        st.subheader("Monthly Income vs Expense Trend")
+
+        trend_df = filtered_df.copy()
+        trend_df["month"] = trend_df["transaction_date"].dt.to_period("M").astype(str)
+
+        monthly_summary = (
+            trend_df.groupby(["month", "transaction_type"])["amount"]
+            .sum()
+            .reset_index()
+        )
+
+        if not monthly_summary.empty:
+            fig_trend = px.bar(
+                monthly_summary,
+                x="month",
+                y="amount",
+                color="transaction_type",
+                barmode="group",
+                title="Monthly Income vs Expense"
+            )
+
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.info("No monthly trend data available.")
 
         if transaction_filter != "All":
             filtered_df = filtered_df[
