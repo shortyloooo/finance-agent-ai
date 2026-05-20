@@ -73,6 +73,27 @@ def get_column_config():
         )
     }
     
+    
+def update_transaction(transaction_id, record):
+    return (
+        supabase.table("transactions")
+        .update(record)
+        .eq("id", transaction_id)
+        .execute()
+    )
+    
+    
+def normalize_transaction_type(value):
+    value = str(value).lower().strip()
+
+    if value in ["expense", "expenses", "spent", "spending"]:
+        return "expense"
+
+    if value in ["income", "incomes", "earned", "received"]:
+        return "income"
+
+    return "expense"
+
 
 def get_display_df(df):
     display_df = df.copy()
@@ -459,7 +480,7 @@ elif page == "Transactions":
     if db_df.empty:
         st.warning("No transactions found.")
     else:
-        st.write("Click one row in the table, then press delete.")
+        st.write("Click one row in the table, then edit or delete it.")
 
         display_df = get_display_df(db_df)
 
@@ -468,7 +489,8 @@ elif page == "Transactions":
             use_container_width=True,
             hide_index=True,
             on_select="rerun",
-            selection_mode="single-row"
+            selection_mode="single-row",
+            column_config=get_column_config()
         )
 
         selected_rows = selected_table.selection.rows
@@ -483,19 +505,98 @@ elif page == "Transactions":
 
             col1, col2, col3 = st.columns(3)
             col1.metric("Amount", f"RM {float(selected_transaction['amount']):,.2f}")
-            col2.metric("Type", str(selected_transaction["transaction_type"]).title())
+            col2.metric("Type", normalize_transaction_type(selected_transaction["transaction_type"]).title())
             col3.metric("Category", selected_transaction["category"])
 
             st.write(f"**Description:** {selected_transaction['description']}")
             st.write(f"**Date:** {selected_transaction['transaction_date']}")
 
-            if selected_transaction.get("payment_method"):
-                st.write(f"**Payment Method:** {selected_transaction['payment_method']}")
+            payment_value = selected_transaction.get("payment_method", "")
 
-            if st.button("Delete Selected Transaction", type="primary"):
-                delete_transaction(selected_id)
-                st.success("Transaction deleted successfully.")
-                st.rerun()
+            if pd.isna(payment_value):
+                payment_value = ""
+
+            if payment_value:
+                st.write(f"**Payment Method:** {payment_value}")
+
+            st.divider()
+            st.subheader("Edit or Delete Transaction")
+
+            with st.form("edit_delete_transaction_form"):
+                edit_col1, edit_col2 = st.columns(2)
+
+                with edit_col1:
+                    edit_date = st.date_input(
+                        "Date",
+                        pd.to_datetime(selected_transaction["transaction_date"]).date()
+                    )
+
+                    edit_description = st.text_input(
+                        "Description",
+                        str(selected_transaction["description"])
+                    )
+
+                    edit_amount = st.number_input(
+                        "Amount",
+                        min_value=0.0,
+                        value=float(selected_transaction["amount"]),
+                        format="%.2f"
+                    )
+
+                with edit_col2:
+                    current_type = normalize_transaction_type(
+                        selected_transaction["transaction_type"]
+                    )
+
+                    edit_type = st.selectbox(
+                        "Type",
+                        ["income", "expense"],
+                        index=["income", "expense"].index(current_type)
+                    )
+
+                    edit_category = st.text_input(
+                        "Category",
+                        str(selected_transaction["category"])
+                    )
+
+                    edit_payment_method = st.text_input(
+                        "Payment Method",
+                        str(payment_value)
+                    )
+
+                action_col1, action_col2 = st.columns(2)
+
+                with action_col1:
+                    save_edit = st.form_submit_button(
+                        "Save Changes",
+                        use_container_width=True
+                    )
+
+                with action_col2:
+                    delete_selected = st.form_submit_button(
+                        "Delete Transaction",
+                        use_container_width=True
+                    )
+
+                if save_edit:
+                    updated_record = {
+                        "transaction_date": str(edit_date),
+                        "description": edit_description,
+                        "amount": float(edit_amount),
+                        "transaction_type": edit_type,
+                        "category": edit_category,
+                        "payment_method": edit_payment_method
+                    }
+
+                    update_transaction(selected_id, updated_record)
+                    st.success("Transaction updated successfully.")
+                    st.rerun()
+
+                if delete_selected:
+                    delete_transaction(selected_id)
+                    st.success("Transaction deleted successfully.")
+                    st.rerun()
+
         else:
             st.info("No transaction selected yet.")
 
