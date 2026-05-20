@@ -1,7 +1,7 @@
 import json
 import re
 import ollama
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 
 ALLOWED_CATEGORIES = [
@@ -15,6 +15,7 @@ ALLOWED_CATEGORIES = [
     "Education",
     "Investment",
     "Transfer",
+    "Reimbursement",
     "Others"
 ]
 
@@ -48,18 +49,81 @@ def extract_amount_from_text(user_text: str):
 def detect_transaction_type(user_text: str):
     text = user_text.lower()
 
+    reimbursement_keywords = [
+        "transfer me",
+        "transferred me",
+        "paid me back",
+        "pay me back",
+        "repaid me",
+        "repay me",
+        "returned me",
+        "claim back",
+        "reimburse",
+        "reimbursement",
+        "split bill",
+        "owe me"
+    ]
+
     income_keywords = [
-        "salary", "income", "earned", "received", "got paid",
-        "allowance", "bonus", "refund", "cashback", "commission"
+        "salary",
+        "income",
+        "earned",
+        "received",
+        "got paid",
+        "allowance",
+        "bonus",
+        "refund",
+        "cashback",
+        "commission",
+        "sold",
+        "profit",
+        "dividend"
     ]
 
     expense_keywords = [
-        "spent", "bought", "paid", "pay", "purchase", "ordered",
-        "grab", "food", "lunch", "dinner", "breakfast", "coffee"
+        "spent",
+        "bought",
+        "paid",
+        "purchase",
+        "ordered",
+        "pay for",
+        "paying"
     ]
+
+    food_keywords = [
+        "lunch",
+        "dinner",
+        "breakfast",
+        "coffee",
+        "tea",
+        "milk tea",
+        "restaurant",
+        "grabfood",
+        "food"
+    ]
+
+    transport_keywords = [
+        "petrol",
+        "fuel",
+        "grab",
+        "taxi",
+        "bus",
+        "train",
+        "parking",
+        "toll"
+    ]
+
+    if any(word in text for word in reimbursement_keywords):
+        return "income"
 
     if any(word in text for word in income_keywords):
         return "income"
+
+    if any(word in text for word in food_keywords):
+        return "expense"
+
+    if any(word in text for word in transport_keywords):
+        return "expense"
 
     if any(word in text for word in expense_keywords):
         return "expense"
@@ -72,6 +136,7 @@ def detect_payment_method(user_text: str):
 
     payment_map = {
         "touch and go": "Touch n Go",
+        "touch n go": "Touch n Go",
         "tng": "Touch n Go",
         "grabpay": "GrabPay",
         "grab pay": "GrabPay",
@@ -91,6 +156,24 @@ def detect_payment_method(user_text: str):
 
 def detect_category(user_text: str, ai_category: str = "Others"):
     text = user_text.lower()
+
+    reimbursement_keywords = [
+        "transfer me",
+        "transferred me",
+        "paid me back",
+        "pay me back",
+        "repaid me",
+        "repay me",
+        "returned me",
+        "claim back",
+        "reimburse",
+        "reimbursement",
+        "split bill",
+        "owe me"
+    ]
+
+    if any(word in text for word in reimbursement_keywords):
+        return "Reimbursement"
 
     category_rules = {
         "Food": ["lunch", "dinner", "breakfast", "food", "coffee", "tea", "milk tea", "restaurant", "mcd", "kfc", "grabfood"],
@@ -117,6 +200,24 @@ def detect_category(user_text: str, ai_category: str = "Others"):
 
 def clean_description(user_text: str, parsed_description: str = ""):
     text = user_text.lower()
+
+    reimbursement_keywords = [
+        "transfer me",
+        "transferred me",
+        "paid me back",
+        "pay me back",
+        "repaid me",
+        "repay me",
+        "returned me",
+        "claim back",
+        "reimburse",
+        "reimbursement",
+        "split bill",
+        "owe me"
+    ]
+
+    if any(word in text for word in reimbursement_keywords):
+        return "Reimbursement"
 
     description_rules = {
         "milk tea": "Milk Tea",
@@ -163,73 +264,69 @@ def parse_transaction_text(user_text: str):
     payment_method = detect_payment_method(user_text)
 
     prompt = f"""
-    You are a finance transaction extraction engine.
+You are a finance transaction extraction engine.
 
-    Your task:
-    Extract exactly ONE personal finance transaction from the user's text.
+Your task:
+Extract exactly ONE personal finance transaction from the user's text.
 
-    User text:
-    "{user_text}"
+User text:
+"{user_text}"
 
-    Today's date:
-    {today}
+Today's date:
+{today}
 
-    Return ONLY valid JSON.
-    Do not include explanation.
-    Do not include markdown.
-    Do not wrap the JSON in ```json.
-    Do not add comments.
+Return ONLY valid JSON.
+Do not include explanation.
+Do not include markdown.
+Do not wrap the JSON in ```json.
+Do not add comments.
 
-    Required JSON format:
-    {{
-    "transaction_date": "{today}",
-    "description": "short item or merchant name",
-    "category": "Others"
-    }}
+Required JSON format:
+{{
+  "transaction_date": "{today}",
+  "description": "short item or merchant name",
+  "category": "Others"
+}}
 
-    Date rules:
-    1. transaction_date must always be valid ISO format: YYYY-MM-DD.
-    2. If the user says "today", use: {today}.
-    3. If the user gives no date, use: {today}.
-    4. If the date is unclear, use: {today}.
-    5. Never return words like "end", "tomorrow", "yesterday", "next week", or "unknown" inside transaction_date.
-    6. Never return invalid dates.
+Date rules:
+1. transaction_date must always be valid ISO format: YYYY-MM-DD.
+2. If the user says "today", use: {today}.
+3. If the user gives no date, use: {today}.
+4. If the date is unclear, use: {today}.
+5. Never return words like "end", "tomorrow", "yesterday", "next week", or "unknown" inside transaction_date.
+6. Never return invalid dates.
 
-    Description rules:
-    1. Use a short clean description.
-    2. Prefer the purchased item or income source.
-    3. Do not include payment method in description.
-    4. Do not include amount in description.
-    5. Do not include date in description.
-    6. Examples:
-    - "spent RM15 for lunch using GrabPay" → "Lunch"
-    - "bought milk tea for RM12.50" → "Milk Tea"
-    - "received RM4000 salary" → "Salary"
-    - "paid RM80 petrol with credit card" → "Petrol"
+Description rules:
+1. Use a short clean description.
+2. Prefer the purchased item, merchant, or income source.
+3. Do not include payment method in description.
+4. Do not include amount in description.
+5. Do not include date in description.
 
-    Category rules:
-    Choose exactly one category from this list:
-    {", ".join(ALLOWED_CATEGORIES)}
+Category rules:
+Choose exactly one category from this list:
+{", ".join(ALLOWED_CATEGORIES)}
 
-    Category examples:
-    - Food: lunch, dinner, breakfast, coffee, tea, milk tea, restaurant, cafe, groceries, GrabFood
-    - Transport: petrol, fuel, toll, parking, Grab ride, taxi, bus, train, MRT, LRT
-    - Salary: salary, payroll, wage, bonus, commission, allowance
-    - Shopping: clothes, shoes, bag, Shopee, Lazada, electronics, accessories
-    - Bills: rent, electricity, water, internet, phone bill, insurance, subscription
-    - Entertainment: movie, cinema, Netflix, Spotify, games, concert
-    - Health: clinic, hospital, doctor, medicine, pharmacy, gym
-    - Education: course, book, tuition, exam, university, certification
-    - Investment: stock, ETF, crypto, dividend, interest
-    - Transfer: transfer to friend, bank transfer, DuitNow transfer
-    - Others: use only if none of the above clearly match
+Category examples:
+- Food: lunch, dinner, breakfast, coffee, tea, milk tea, restaurant, cafe, groceries, GrabFood
+- Transport: petrol, fuel, toll, parking, Grab ride, taxi, bus, train, MRT, LRT
+- Salary: salary, payroll, wage, bonus, commission, allowance
+- Shopping: clothes, shoes, bag, Shopee, Lazada, electronics, accessories
+- Bills: rent, electricity, water, internet, phone bill, insurance, subscription
+- Entertainment: movie, cinema, Netflix, Spotify, games, concert
+- Health: clinic, hospital, doctor, medicine, pharmacy, gym
+- Education: course, book, tuition, exam, university, certification
+- Investment: stock, ETF, crypto, dividend, interest
+- Transfer: transfer to friend, bank transfer, DuitNow transfer
+- Reimbursement: paid me back, transferred me back, reimbursed me, split bill repayment
+- Others: use only if none of the above clearly match
 
-    Important:
-    - Do not guess extra details.
-    - Do not create multiple transactions.
-    - Do not return amount, transaction_type, or payment_method.
-    - Python code will handle amount, transaction_type, and payment_method separately.
-    """
+Important:
+- Do not guess extra details.
+- Do not create multiple transactions.
+- Do not return amount, transaction_type, or payment_method.
+- Python code will handle amount, transaction_type, and payment_method separately.
+"""
 
     try:
         response = ollama.chat(
