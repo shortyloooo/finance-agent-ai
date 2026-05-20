@@ -1,199 +1,333 @@
 import sys
 import os
-import plotly.express as px
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 from database.supabase_client import supabase
 from agent.finance_agent import build_finance_agent
 from agent.transaction_parser import parse_transaction_text
 
-st.set_page_config(page_title="Finance Agent AI", layout="wide")
 
-st.title("Finance Agent AI")
-
-st.subheader("Upload Manual Transaction")
-
-with st.form("manual_transaction_form"):
-    date = st.date_input("Date")
-    description = st.text_input("Description")
-    amount = st.number_input("Amount", format="%.2f")
-    transaction_type = st.selectbox("Transaction Type", ["income", "expense"])
-    category = st.text_input("Category")
-    payment_method = st.text_input("Payment Method")
-
-    submitted = st.form_submit_button("Add Transaction")
-
-    if submitted:
-        record = {
-            "transaction_date": str(date),
-            "description": description,
-            "amount": float(amount),
-            "transaction_type": transaction_type,
-            "category": category,
-            "payment_method": payment_method,
-            "source": "manual",
-            "notes": "manual entry"
-        }
-
-        supabase.table("transactions").insert(record).execute()
-        st.success("Transaction saved successfully!")
-
-st.write("Upload your bank statement and save transactions into Supabase.")
-
-st.subheader("AI Quick Add Transaction")
-
-quick_text = st.text_input(
-    "Type a transaction",
-    placeholder="Example: I spent RM25 on lunch today"
+st.set_page_config(
+    page_title="Finance Agent AI",
+    page_icon="💰",
+    layout="wide"
 )
 
-if st.button("AI Add Transaction"):
-    try:
-        parsed = parse_transaction_text(quick_text)
 
-        record = {
-            "transaction_date": parsed["transaction_date"],
-            "description": parsed["description"],
-            "amount": float(parsed["amount"]),
-            "transaction_type": parsed["transaction_type"],
-            "category": parsed["category"],
-            "payment_method": parsed["payment_method"],
-            "source": "ai_text",
-            "notes": quick_text
-        }
+def load_transactions():
+    response = (
+        supabase.table("transactions")
+        .select("*")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return response.data
 
-        supabase.table("transactions").insert(record).execute()
 
-        st.success("Transaction saved successfully!")
+def insert_transaction(record):
+    return supabase.table("transactions").insert(record).execute()
 
-        st.markdown("### Added Transaction")
 
-        col1, col2, col3 = st.columns(3)
+def display_transaction_card(parsed):
+    st.success("Transaction saved successfully!")
 
-        col1.metric("Amount", f"RM {float(parsed['amount']):,.2f}")
-        col2.metric("Type", parsed["transaction_type"].title())
-        col3.metric("Category", parsed["category"])
-
-        st.write(f"**Date:** {parsed['transaction_date']}")
-        st.write(f"**Description:** {parsed['description']}")
-
-        if parsed.get("payment_method"):
-            st.write(f"**Payment Method:** {parsed['payment_method']}")
-
-    except Exception as e:
-        st.error("Failed to parse transaction.")
-        st.write(e)
-
-uploaded_file = st.file_uploader(
-    "Upload CSV or Excel file",
-    type=["csv", "xlsx"]
-)
-
-if uploaded_file:
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
-
-    st.subheader("Preview Uploaded File")
-    st.dataframe(df)
-
-    st.info("For now, your file must have these columns: date, description, amount, type, category")
-
-    if st.button("Save to Supabase"):
-        records = []
-
-        for _, row in df.iterrows():
-            records.append({
-                "transaction_date": str(row["date"]),
-                "description": str(row["description"]),
-                "amount": float(row["amount"]),
-                "transaction_type": str(row["type"]),
-                "category": str(row["category"]),
-                "payment_method": None,
-                "source": uploaded_file.name,
-                "notes": "uploaded file"
-            })
-
-        response = supabase.table("transactions").insert(records).execute()
-
-        st.success(f"Inserted {len(records)} transactions successfully!")
-
-st.divider()
-
-st.subheader("Transactions in Database")
-
-response = supabase.table("transactions").select("*").order("created_at", desc=True).execute()
-
-if response.data:
-    st.dataframe(response.data)
-else:
-    st.warning("No transactions found.")
-    
-if response.data:
-    db_df = pd.DataFrame(response.data)
-
-    st.subheader("📊 Finance Summary")
-
-    total_income = db_df.loc[
-        db_df["transaction_type"] == "income", "amount"
-    ].sum()
-
-    total_expense = db_df.loc[
-        db_df["transaction_type"] == "expense", "amount"
-    ].sum()
-
-    balance = total_income - total_expense
+    st.markdown("### Added Transaction")
 
     col1, col2, col3 = st.columns(3)
+    col1.metric("Amount", f"RM {float(parsed['amount']):,.2f}")
+    col2.metric("Type", parsed["transaction_type"].title())
+    col3.metric("Category", parsed["category"])
 
-    col1.metric("Total Income", f"RM {total_income:,.2f}")
-    col2.metric("Total Expense", f"RM {total_expense:,.2f}")
-    col3.metric("Balance", f"RM {balance:,.2f}")
+    st.write(f"**Date:** {parsed['transaction_date']}")
+    st.write(f"**Description:** {parsed['description']}")
 
-    st.subheader("Spending by Category")
+    if parsed.get("payment_method"):
+        st.write(f"**Payment Method:** {parsed['payment_method']}")
 
-    expense_df = db_df[db_df["transaction_type"] == "expense"]
 
-    category_summary = (
-        expense_df.groupby("category")["amount"]
-        .sum()
-        .reset_index()
-        .sort_values("amount", ascending=False)
+st.sidebar.title("💰 Finance Agent AI")
+
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "AI Quick Entry",
+        "Manual Entry",
+        "CSV / Excel Upload",
+        "AI Budget Advice",
+        "Transactions"
+    ]
+)
+
+st.sidebar.divider()
+st.sidebar.caption(
+    "Personal finance tracker powered by Supabase, Streamlit, Ollama, and LangGraph."
+)
+
+
+transactions = load_transactions()
+db_df = pd.DataFrame(transactions) if transactions else pd.DataFrame()
+
+st.title("Finance Agent AI")
+st.caption("Track income, expenses, spending categories, and get budgeting advice.")
+
+
+# =========================
+# Dashboard
+# =========================
+
+if page == "Dashboard":
+    st.header("📊 Finance Dashboard")
+
+    if db_df.empty:
+        st.warning("No transactions found. Add transactions using AI Quick Entry, Manual Entry, or CSV Upload.")
+    else:
+        total_income = db_df.loc[
+            db_df["transaction_type"] == "income", "amount"
+        ].sum()
+
+        total_expense = db_df.loc[
+            db_df["transaction_type"] == "expense", "amount"
+        ].sum()
+
+        balance = total_income - total_expense
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Income", f"RM {total_income:,.2f}")
+        col2.metric("Total Expense", f"RM {total_expense:,.2f}")
+        col3.metric("Balance", f"RM {balance:,.2f}")
+
+        st.divider()
+
+        expense_df = db_df[db_df["transaction_type"] == "expense"]
+
+        category_summary = (
+            expense_df.groupby("category")["amount"]
+            .sum()
+            .reset_index()
+            .sort_values("amount", ascending=False)
+        )
+
+        col_left, col_right = st.columns([1, 1])
+
+        with col_left:
+            st.subheader("Spending by Category")
+            st.dataframe(category_summary, use_container_width=True)
+
+        with col_right:
+            if not category_summary.empty:
+                fig = px.pie(
+                    category_summary,
+                    names="category",
+                    values="amount",
+                    title="Expense Breakdown by Category"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No expense data available.")
+
+
+# =========================
+# AI Quick Entry
+# =========================
+
+elif page == "AI Quick Entry":
+    st.header("🤖 AI Quick Entry")
+    st.write("Type your transaction naturally, and the AI will extract the details.")
+
+    quick_text = st.text_area(
+        "Transaction text",
+        placeholder="Example: Spent RM15 for lunch today, paid with GrabPay",
+        height=120
     )
 
-    st.dataframe(category_summary)
+    if st.button("Add Transaction", use_container_width=True):
+        if not quick_text.strip():
+            st.warning("Please enter a transaction first.")
+        else:
+            try:
+                parsed = parse_transaction_text(quick_text)
 
-if not category_summary.empty:
-    fig = px.pie(
-        category_summary,
-        names="category",
-        values="amount",
-        title="Expense Breakdown by Category"
+                record = {
+                    "transaction_date": parsed["transaction_date"],
+                    "description": parsed["description"],
+                    "amount": float(parsed["amount"]),
+                    "transaction_type": parsed["transaction_type"],
+                    "category": parsed["category"],
+                    "payment_method": parsed["payment_method"],
+                    "source": "ai_text",
+                    "notes": quick_text
+                }
+
+                insert_transaction(record)
+                display_transaction_card(parsed)
+
+            except Exception as e:
+                st.error("Failed to parse or save transaction.")
+                st.exception(e)
+
+    st.divider()
+    st.subheader("Examples")
+    st.info("Spent RM12.50 on milk tea today using Touch n Go")
+    st.info("Received RM4000 salary today")
+    st.info("Paid RM80 for petrol using credit card")
+
+
+# =========================
+# Manual Entry
+# =========================
+
+elif page == "Manual Entry":
+    st.header("➕ Manual Transaction Entry")
+
+    with st.form("manual_transaction_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            transaction_date = st.date_input("Date")
+            description = st.text_input("Description")
+            amount = st.number_input("Amount", min_value=0.0, format="%.2f")
+
+        with col2:
+            transaction_type = st.selectbox("Transaction Type", ["income", "expense"])
+            category = st.text_input("Category")
+            payment_method = st.text_input("Payment Method")
+
+        submitted = st.form_submit_button("Save Transaction")
+
+        if submitted:
+            record = {
+                "transaction_date": str(transaction_date),
+                "description": description,
+                "amount": float(amount),
+                "transaction_type": transaction_type,
+                "category": category,
+                "payment_method": payment_method,
+                "source": "manual",
+                "notes": "manual entry"
+            }
+
+            insert_transaction(record)
+            st.success("Manual transaction saved successfully!")
+
+
+# =========================
+# CSV / Excel Upload
+# =========================
+
+elif page == "CSV / Excel Upload":
+    st.header("📁 CSV / Excel Upload")
+
+    uploaded_file = st.file_uploader(
+        "Upload CSV or Excel file",
+        type=["csv", "xlsx"]
     )
 
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No expense data available for chart.")
-    
-st.subheader("AI Budgeting Advice")
+    st.info("Required columns: date, description, amount, type, category")
 
-if st.button("Generate Budget Advice"):
-    finance_agent = build_finance_agent()
+    if uploaded_file:
+        if uploaded_file.name.endswith(".csv"):
+            upload_df = pd.read_csv(uploaded_file)
+        else:
+            upload_df = pd.read_excel(uploaded_file)
 
-    result = finance_agent.invoke({
-        "total_income": float(total_income),
-        "total_expense": float(total_expense),
-        "balance": float(balance),
-        "category_summary": category_summary,
-        "summary_text": "",
-        "risk_flags": [],
-        "budget_plan": {},
-        "advice": ""
-    })
+        st.subheader("Preview")
+        st.dataframe(upload_df, use_container_width=True)
 
-    st.markdown(result["advice"])
+        if st.button("Save Uploaded Transactions"):
+            records = []
+
+            for _, row in upload_df.iterrows():
+                records.append({
+                    "transaction_date": str(row["date"]),
+                    "description": str(row["description"]),
+                    "amount": float(row["amount"]),
+                    "transaction_type": str(row["type"]),
+                    "category": str(row["category"]),
+                    "payment_method": None,
+                    "source": uploaded_file.name,
+                    "notes": "uploaded file"
+                })
+
+            supabase.table("transactions").insert(records).execute()
+            st.success(f"Inserted {len(records)} transactions successfully!")
+
+
+# =========================
+# AI Budget Advice
+# =========================
+
+elif page == "AI Budget Advice":
+    st.header("🧠 AI Budget Advice")
+
+    if db_df.empty:
+        st.warning("No transactions found.")
+    else:
+        total_income = db_df.loc[
+            db_df["transaction_type"] == "income", "amount"
+        ].sum()
+
+        total_expense = db_df.loc[
+            db_df["transaction_type"] == "expense", "amount"
+        ].sum()
+
+        balance = total_income - total_expense
+
+        expense_df = db_df[db_df["transaction_type"] == "expense"]
+
+        category_summary = (
+            expense_df.groupby("category")["amount"]
+            .sum()
+            .reset_index()
+            .sort_values("amount", ascending=False)
+        )
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Income", f"RM {total_income:,.2f}")
+        col2.metric("Expense", f"RM {total_expense:,.2f}")
+        col3.metric("Balance", f"RM {balance:,.2f}")
+
+        st.divider()
+
+        if st.button("Generate Budget Advice", use_container_width=True):
+            finance_agent = build_finance_agent()
+
+            result = finance_agent.invoke({
+                "total_income": float(total_income),
+                "total_expense": float(total_expense),
+                "balance": float(balance),
+                "category_summary": category_summary,
+                "summary_text": "",
+                "risk_flags": [],
+                "budget_plan": {},
+                "advice": ""
+            })
+
+            st.markdown(result["advice"])
+
+
+# =========================
+# Transactions
+# =========================
+
+elif page == "Transactions":
+    st.header("📄 Transactions")
+
+    if db_df.empty:
+        st.warning("No transactions found.")
+    else:
+        st.dataframe(db_df, use_container_width=True)
+
+        csv = db_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Download Transactions as CSV",
+            data=csv,
+            file_name="transactions.csv",
+            mime="text/csv"
+        )
