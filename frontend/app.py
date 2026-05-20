@@ -8,7 +8,7 @@ import streamlit as st
 import pandas as pd
 
 from database.supabase_client import supabase
-from agent.budget_advisor import generate_budget_advice
+from agent.finance_agent import build_finance_agent
 
 st.set_page_config(page_title="Finance Agent AI", layout="wide")
 
@@ -138,11 +138,14 @@ else:
 st.subheader("AI Budgeting Advice")
 
 if st.button("Generate Budget Advice"):
-    advice =generate_budget_advice(
-        total_income,
-        total_expense,
-        balance,
-        category_summary
-    )
-    
-    st.write(advice)
+    finance_agent = build_finance_agent()
+
+    result = finance_agent.invoke({
+        "total_income": float(total_income),
+        "total_expense": float(total_expense),
+        "balance": float(balance),
+        "category_summary": category_summary,
+        "advice": ""
+    })
+
+    st.write(result["advice"])
