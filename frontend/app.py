@@ -57,3 +57,37 @@ if response.data:
     st.dataframe(response.data)
 else:
     st.warning("No transactions found.")
+    
+if response.data:
+    db_df = pd.DataFrame(response.data)
+
+    st.subheader("📊 Finance Summary")
+
+    total_income = db_df.loc[
+        db_df["transaction_type"] == "income", "amount"
+    ].sum()
+
+    total_expense = db_df.loc[
+        db_df["transaction_type"] == "expense", "amount"
+    ].sum()
+
+    balance = total_income - total_expense
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Income", f"RM {total_income:,.2f}")
+    col2.metric("Total Expense", f"RM {total_expense:,.2f}")
+    col3.metric("Balance", f"RM {balance:,.2f}")
+
+    st.subheader("Spending by Category")
+
+    expense_df = db_df[db_df["transaction_type"] == "expense"]
+
+    category_summary = (
+        expense_df.groupby("category")["amount"]
+        .sum()
+        .reset_index()
+        .sort_values("amount", ascending=False)
+    )
+
+    st.dataframe(category_summary)
