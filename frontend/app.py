@@ -1,5 +1,6 @@
 import sys
 import os
+import plotly.express as px
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
@@ -91,3 +92,15 @@ if response.data:
     )
 
     st.dataframe(category_summary)
+
+if not category_summary.empty:
+    fig = px.pie(
+        category_summary,
+        names="category",
+        values="amount",
+        title="Expense Breakdown by Category"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No expense data available for chart.")
