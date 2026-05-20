@@ -11,6 +11,33 @@ st.set_page_config(page_title="Finance Agent AI", layout="wide")
 
 st.title("Finance Agent AI")
 
+st.subheader("Upload Manual Transaction")
+
+with st.form("manual_transaction_form"):
+    date = st.date_input("Date")
+    description = st.text_input("Description")
+    amount = st.number_input("Amount", format="%.2f")
+    transaction_type = st.selectbox("Transaction Type", ["income", "expense"])
+    category = st.text_input("Category")
+    payment_method = st.text_input("Payment Method")
+
+    submitted = st.form_submit_button("Add Transaction")
+
+    if submitted:
+        record = {
+            "transaction_date": str(date),
+            "description": description,
+            "amount": float(amount),
+            "transaction_type": transaction_type,
+            "category": category,
+            "payment_method": payment_method,
+            "source": "manual",
+            "notes": "manual entry"
+        }
+
+        supabase.table("transactions").insert(record).execute()
+        st.success("Transaction saved successfully!")
+
 st.write("Upload your bank statement and save transactions into Supabase.")
 
 uploaded_file = st.file_uploader(
