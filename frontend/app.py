@@ -8,7 +8,7 @@ from database.supabase_client import supabase
 
 st.set_page_config(page_title="Finance Agent AI", layout="wide")
 
-st.title("💰 Finance Agent AI")
+st.title("Finance Agent AI")
 
 st.write("Upload your bank statement and save transactions into Supabase.")
 
