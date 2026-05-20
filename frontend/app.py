@@ -9,6 +9,7 @@ import pandas as pd
 
 from database.supabase_client import supabase
 from agent.finance_agent import build_finance_agent
+from agent.transaction_parser import parse_transaction_text
 
 st.set_page_config(page_title="Finance Agent AI", layout="wide")
 
@@ -42,6 +43,50 @@ with st.form("manual_transaction_form"):
         st.success("Transaction saved successfully!")
 
 st.write("Upload your bank statement and save transactions into Supabase.")
+
+st.subheader("AI Quick Add Transaction")
+
+quick_text = st.text_input(
+    "Type a transaction",
+    placeholder="Example: I spent RM25 on lunch today"
+)
+
+if st.button("AI Add Transaction"):
+    try:
+        parsed = parse_transaction_text(quick_text)
+
+        record = {
+            "transaction_date": parsed["transaction_date"],
+            "description": parsed["description"],
+            "amount": float(parsed["amount"]),
+            "transaction_type": parsed["transaction_type"],
+            "category": parsed["category"],
+            "payment_method": parsed["payment_method"],
+            "source": "ai_text",
+            "notes": quick_text
+        }
+
+        supabase.table("transactions").insert(record).execute()
+
+        st.success("Transaction saved successfully!")
+
+        st.markdown("### Added Transaction")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Amount", f"RM {float(parsed['amount']):,.2f}")
+        col2.metric("Type", parsed["transaction_type"].title())
+        col3.metric("Category", parsed["category"])
+
+        st.write(f"**Date:** {parsed['transaction_date']}")
+        st.write(f"**Description:** {parsed['description']}")
+
+        if parsed.get("payment_method"):
+            st.write(f"**Payment Method:** {parsed['payment_method']}")
+
+    except Exception as e:
+        st.error("Failed to parse transaction.")
+        st.write(e)
 
 uploaded_file = st.file_uploader(
     "Upload CSV or Excel file",
