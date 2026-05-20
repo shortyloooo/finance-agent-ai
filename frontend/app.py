@@ -1,11 +1,14 @@
 import sys
 import os
 import plotly.express as px
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
 import pandas as pd
+
 from database.supabase_client import supabase
+from agent.budget_advisor import generate_budget_advice
 
 st.set_page_config(page_title="Finance Agent AI", layout="wide")
 
@@ -131,3 +134,15 @@ if not category_summary.empty:
     st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No expense data available for chart.")
+    
+st.subheader("AI Budgeting Advice")
+
+if st.button("Generate Budget Advice"):
+    advice =generate_budget_advice(
+        total_income,
+        total_expense,
+        balance,
+        category_summary
+    )
+    
+    st.write(advice)
