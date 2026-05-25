@@ -386,6 +386,8 @@ st.caption("Track income, expenses, spending categories, and get budgeting advic
 
 if page == "Dashboard":
     st.header("📊 Finance Dashboard")
+    
+    st.header("Hello Testing")
 
     if db_df.empty:
         st.warning("No transactions found. Add transactions using AI Quick Entry, Manual Entry, or CSV Upload.")
