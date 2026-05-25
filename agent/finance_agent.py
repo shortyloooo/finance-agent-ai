@@ -72,49 +72,83 @@ def create_budget_plan_node(state: FinanceState):
     }
 
 
+import ollama
+
+
 def generate_final_advice_node(state: FinanceState):
-    category_summary = state["category_summary"]
 
-    if not category_summary.empty:
-        category_lines = []
-        for _, row in category_summary.iterrows():
-            category_lines.append(
-                f"- {row['category']}: RM {row['amount']:.2f}"
-            )
-        category_text = "\n".join(category_lines)
-    else:
-        category_text = "- No expense category found."
+    category_text = ""
 
-    final_advice = f"""
-### Finance Summary
+    for _, row in state["category_summary"].iterrows():
+        category_text += f"- {row['category']}: RM {row['amount']:.2f}\n"
 
-{state["summary_text"]}
+    risk_text = "\n".join(state["risk_flags"])
 
-### Spending by Category
+    prompt = f"""
+    You are an experienced personal financial advisor.
 
-{category_text}
+    Analyze the user's financial situation naturally like a real human advisor.
 
-### Spending Risk Flags
+    User Financial Summary:
+    - Total Income: RM {state['total_income']:.2f}
+    - Total Expense: RM {state['total_expense']:.2f}
+    - Balance: RM {state['balance']:.2f}
 
-{chr(10).join(["- " + flag for flag in state["risk_flags"]]) if state["risk_flags"] else "- No major risk detected."}
+    Spending Categories:
+    {category_text}
 
-### Suggested Monthly Budget
+    Detected Risks:
+    {risk_text}
 
-- Needs: RM {state["budget_plan"]["Needs"]:.2f}
-- Wants: RM {state["budget_plan"]["Wants"]:.2f}
-- Savings: RM {state["budget_plan"]["Savings"]:.2f}
+    Budget Recommendation:
+    - Needs: RM {state["budget_plan"]["Needs"]:.2f}
+    - Wants: RM {state["budget_plan"]["Wants"]:.2f}
+    - Savings: RM {state["budget_plan"]["Savings"]:.2f}
 
-### Action Plan
+    Instructions:
+    - Give realistic financial advice.
+    - Mention specific categories and spending behavior.
+    - Explain what the user is doing well.
+    - Explain what should improve.
+    - Give practical next steps.
+    - Sound natural and human.
+    - Avoid generic advice.
+    - Use tables if it makes the advice clearer.
+    - Be detailed but concise.
 
-- Review your highest spending category first because it has the biggest impact on your savings.
-- Set a monthly limit for each major category.
-- Track expenses weekly instead of waiting until month end.
-- Keep your savings target separate from daily spending money.
-"""
+    Response format:
+    ## Quick Financial Health Summary
+
+    ## Key Spending Insights
+
+    ## Budget Recommendation Table
+
+    ## Action Plan Table
+
+    ## Final Advice
+
+    Output rules:
+    - Keep response under 350 words.
+    - Prioritize the top 3 most important insights.
+    - Use markdown tables where useful.
+    - Avoid repeating the same point.
+    """
+
+    response = ollama.chat(
+        model="phi3",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    advice = response["message"]["content"]
 
     return {
         **state,
-        "advice": final_advice
+        "advice": advice
     }
 
 

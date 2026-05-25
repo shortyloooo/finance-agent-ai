@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import date, timedelta
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -19,6 +20,10 @@ st.set_page_config(
 )
 
 
+# =========================
+# CSS
+# =========================
+
 st.markdown("""
 <style>
 div[data-testid="stFormSubmitButton"] button[kind="primary"] {
@@ -37,13 +42,161 @@ div[data-testid="stFormSubmitButton"] button[kind="secondary"] {
 
 
 # =========================
-# Helper Functions
+# Auth Functions
 # =========================
 
-def load_transactions():
+def get_previous_month_range():
+    today = date.today()
+    first_day_current_month = today.replace(day=1)
+    last_day_previous_month = first_day_current_month - timedelta(days=1)
+    first_day_previous_month = last_day_previous_month.replace(day=1)
+
+    return first_day_previous_month, last_day_previous_month
+
+
+def get_previous_month_transactions(user_id):
+    start_date, end_date = get_previous_month_range()
+
     response = (
         supabase.table("transactions")
         .select("*")
+        .eq("user_id", user_id)
+        .gte("transaction_date", str(start_date))
+        .lte("transaction_date", str(end_date))
+        .execute()
+    )
+
+    return response.data
+
+
+def delete_previous_month_transactions(user_id):
+    start_date, end_date = get_previous_month_range()
+
+    return (
+        supabase.table("transactions")
+        .delete()
+        .eq("user_id", user_id)
+        .gte("transaction_date", str(start_date))
+        .lte("transaction_date", str(end_date))
+        .execute()
+    )
+
+def restore_auth_session():
+    if "access_token" in st.session_state and "refresh_token" in st.session_state:
+        try:
+            supabase.auth.set_session(
+                st.session_state["access_token"],
+                st.session_state["refresh_token"]
+            )
+        except Exception:
+            pass
+
+
+def auth_page():
+    st.title("💰 Finance Agent AI")
+    st.caption("Login or register to manage your personal finances.")
+
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+
+        if st.button("Login", use_container_width=True):
+            if not email.strip() or not password.strip():
+                st.warning("Please enter both email and password.")
+            else:
+                try:
+                    response = supabase.auth.sign_in_with_password({
+                        "email": email,
+                        "password": password
+                    })
+
+                    st.session_state["user"] = response.user
+                    st.session_state["access_token"] = response.session.access_token
+                    st.session_state["refresh_token"] = response.session.refresh_token
+
+                    st.success("Login successful.")
+                    st.rerun()
+
+                except Exception:
+                    st.error("Login failed. Please check your email and password.")
+
+    with tab2:
+        email = st.text_input("Email", key="register_email")
+        password = st.text_input("Password", type="password", key="register_password")
+
+        if st.button("Register", use_container_width=True):
+            if not email.strip() or not password.strip():
+                st.warning("Please enter both email and password.")
+            elif len(password) < 6:
+                st.warning("Password must be at least 6 characters.")
+            else:
+                try:
+                    supabase.auth.sign_up({
+                        "email": email,
+                        "password": password
+                    })
+
+                    st.success("Account created. Please check your email if confirmation is required.")
+
+                except Exception:
+                    st.error("Registration failed. Please try again.")
+
+
+restore_auth_session()
+
+if "user" not in st.session_state:
+    auth_page()
+    st.stop()
+
+user = st.session_state["user"]
+user_id = user.id
+
+today = date.today()
+
+if today.day <= 7:
+    previous_month_data = get_previous_month_transactions(user_id)
+
+    if previous_month_data:
+        st.warning(
+            "Monthly reset reminder: Please download last month’s transactions before they are cleared after the 7th."
+        )
+
+        previous_month_df = pd.DataFrame(previous_month_data)
+
+        if "id" in previous_month_df.columns:
+            previous_month_df = previous_month_df.drop(columns=["id"])
+
+        if "user_id" in previous_month_df.columns:
+            previous_month_df = previous_month_df.drop(columns=["user_id"])
+
+        csv = previous_month_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Download Last Month Transactions",
+            data=csv,
+            file_name="last_month_transactions.csv",
+            mime="text/csv"
+        )
+
+elif today.day > 7:
+    previous_month_data = get_previous_month_transactions(user_id)
+
+    if previous_month_data:
+        delete_previous_month_transactions(user_id)
+        st.info("Previous month’s transactions have been cleared after the 7-day download period.")
+        st.rerun()
+
+# =========================
+# Helper Functions
+# =========================
+
+def load_transactions(user_id):
+    response = (
+        supabase.table("transactions")
+        .select("*")
+        .eq("user_id", user_id)
         .order("created_at", desc=True)
         .execute()
     )
@@ -72,87 +225,11 @@ def delete_transaction(transaction_id):
     )
 
 
-def find_similar_transaction(record):
-    response = (
-        supabase.table("transactions")
-        .select("*")
-        .eq("transaction_date", record["transaction_date"])
-        .eq("description", record["description"])
-        .eq("amount", record["amount"])
-        .eq("transaction_type", record["transaction_type"])
-        .execute()
-    )
-    return response.data
-
-
-def prepare_dataframe(transactions):
-    df = pd.DataFrame(transactions) if transactions else pd.DataFrame()
-
-    if not df.empty:
-        df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
-        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
-        df["transaction_type"] = df["transaction_type"].apply(normalize_transaction_type)
-
-    return df
-
-
-def normalize_transaction_type(value):
-    value = str(value).lower().strip()
-
-    if value in ["expense", "expenses", "spent", "spending"]:
-        return "expense"
-
-    if value in ["income", "incomes", "earned", "received"]:
-        return "income"
-
-    return "expense"
-
-
-def get_column_config():
-    return {
-        "No.": st.column_config.NumberColumn("No.", width=60),
-        "category": st.column_config.TextColumn("Category", width="medium"),
-        "amount": st.column_config.NumberColumn("Amount", width="small", format="RM %.2f")
-    }
-
-
-def get_display_df(df):
-    display_df = df.copy()
-
-    if "id" in display_df.columns:
-        display_df = display_df.drop(columns=["id"])
-
-    display_df.insert(0, "No.", range(1, len(display_df) + 1))
-
-    return display_df
-
-
-def get_category_display_df(category_summary):
-    display_df = category_summary.reset_index(drop=True).copy()
-    display_df.insert(0, "No.", range(1, len(display_df) + 1))
-    return display_df
-
-
-def display_transaction_card(parsed):
-    st.success("Transaction saved successfully!")
-
-    st.markdown("### Added Transaction")
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Amount", f"RM {float(parsed['amount']):,.2f}")
-    col2.metric("Type", parsed["transaction_type"].title())
-    col3.metric("Category", parsed["category"])
-
-    st.write(f"**Date:** {parsed['transaction_date']}")
-    st.write(f"**Description:** {parsed['description']}")
-
-    if parsed.get("payment_method"):
-        st.write(f"**Payment Method:** {parsed['payment_method']}")
-
-def load_budget_goals():
+def load_budget_goals(user_id):
     response = (
         supabase.table("budget_goals")
         .select("*")
+        .eq("user_id", user_id)
         .order("category")
         .execute()
     )
@@ -172,25 +249,103 @@ def update_budget_goal(goal_id, record):
     )
 
 
-def delete_budget_goal(goal_id):
-    return (
-        supabase.table("budget_goals")
-        .delete()
-        .eq("id", goal_id)
+def find_similar_transaction(record):
+    response = (
+        supabase.table("transactions")
+        .select("*")
+        .eq("user_id", record["user_id"])
+        .eq("transaction_date", record["transaction_date"])
+        .eq("description", record["description"])
+        .eq("amount", record["amount"])
+        .eq("transaction_type", record["transaction_type"])
         .execute()
     )
-    
+    return response.data
+
+
+def normalize_transaction_type(value):
+    value = str(value).lower().strip()
+
+    if value in ["expense", "expenses", "spent", "spending"]:
+        return "expense"
+
+    if value in ["income", "incomes", "earned", "received"]:
+        return "income"
+
+    return "expense"
+
+
+def prepare_dataframe(transactions):
+    df = pd.DataFrame(transactions) if transactions else pd.DataFrame()
+
+    if not df.empty:
+        df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+        df["transaction_type"] = df["transaction_type"].apply(normalize_transaction_type)
+
+    return df
+
+
+def get_column_config():
+    return {
+        "No.": st.column_config.NumberColumn("No.", width=60),
+        "category": st.column_config.TextColumn("Category", width="medium"),
+        "amount": st.column_config.NumberColumn("Amount", width="small", format="RM %.2f")
+    }
+
+
+def get_display_df(df):
+    display_df = df.copy()
+
+    if "id" in display_df.columns:
+        display_df = display_df.drop(columns=["id"])
+
+    if "user_id" in display_df.columns:
+        display_df = display_df.drop(columns=["user_id"])
+
+    display_df.insert(0, "No.", range(1, len(display_df) + 1))
+    return display_df
+
+
+def get_category_display_df(category_summary):
+    display_df = category_summary.reset_index(drop=True).copy()
+    display_df.insert(0, "No.", range(1, len(display_df) + 1))
+    return display_df
+
+
 def validate_upload_columns(upload_df):
     required_columns = ["date", "description", "amount", "type", "category"]
-    missing_columns = [col for col in required_columns if col not in upload_df.columns]
+    return [col for col in required_columns if col not in upload_df.columns]
 
-    return missing_columns
+
+def display_transaction_card(parsed):
+    st.success("Transaction saved successfully!")
+
+    st.markdown("### Added Transaction")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Amount", f"RM {float(parsed['amount']):,.2f}")
+    col2.metric("Type", parsed["transaction_type"].title())
+    col3.metric("Category", parsed["category"])
+
+    st.write(f"**Date:** {parsed['transaction_date']}")
+    st.write(f"**Description:** {parsed['description']}")
+
+    if parsed.get("payment_method"):
+        st.write(f"**Payment Method:** {parsed['payment_method']}")
+
 
 # =========================
 # Sidebar
 # =========================
 
 st.sidebar.title("💰 Finance Agent AI")
+st.sidebar.caption(f"Logged in as: {user.email}")
+
+if st.sidebar.button("Logout", use_container_width=True):
+    supabase.auth.sign_out()
+    st.session_state.clear()
+    st.rerun()
 
 page = st.sidebar.radio(
     "Navigation",
@@ -215,10 +370,10 @@ st.sidebar.caption(
 # Load Data
 # =========================
 
-transactions = load_transactions()
+transactions = load_transactions(user_id)
 db_df = prepare_dataframe(transactions)
 
-budget_goals = load_budget_goals()
+budget_goals = load_budget_goals(user_id)
 budget_df = pd.DataFrame(budget_goals) if budget_goals else pd.DataFrame()
 
 st.title("Finance Agent AI")
@@ -298,18 +453,15 @@ if page == "Dashboard":
                 .reset_index()
             )
 
-            if not monthly_summary.empty:
-                fig_trend = px.bar(
-                    monthly_summary,
-                    x="month",
-                    y="amount",
-                    color="transaction_type",
-                    barmode="group",
-                    title="Monthly Income vs Expense"
-                )
-                st.plotly_chart(fig_trend, use_container_width=True)
-            else:
-                st.info("No monthly trend data available.")
+            fig_trend = px.bar(
+                monthly_summary,
+                x="month",
+                y="amount",
+                color="transaction_type",
+                barmode="group",
+                title="Monthly Income vs Expense"
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
 
             st.divider()
 
@@ -345,6 +497,56 @@ if page == "Dashboard":
                 else:
                     st.info("No expense data available.")
 
+            st.divider()
+            st.subheader("Budget vs Actual Spending")
+
+            if budget_df.empty:
+                st.info("No budget goals set yet. Add budget goals from the Budget Goals page.")
+            else:
+                actual_spending = (
+                    filtered_df[filtered_df["transaction_type"] == "expense"]
+                    .groupby("category")["amount"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"amount": "actual_spending"})
+                )
+
+                budget_compare = budget_df.merge(
+                    actual_spending,
+                    on="category",
+                    how="left"
+                )
+
+                budget_compare["actual_spending"] = budget_compare["actual_spending"].fillna(0)
+                budget_compare["remaining_budget"] = (
+                    budget_compare["monthly_budget"] - budget_compare["actual_spending"]
+                )
+                budget_compare["usage_percent"] = (
+                    budget_compare["actual_spending"] / budget_compare["monthly_budget"] * 100
+                ).round(2)
+
+                display_budget_compare = budget_compare[
+                    ["category", "monthly_budget", "actual_spending", "remaining_budget", "usage_percent"]
+                ].copy()
+
+                display_budget_compare.insert(0, "No.", range(1, len(display_budget_compare) + 1))
+
+                st.dataframe(
+                    display_budget_compare,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                fig_budget = px.bar(
+                    budget_compare,
+                    x="category",
+                    y=["monthly_budget", "actual_spending"],
+                    barmode="group",
+                    title="Budget vs Actual Spending"
+                )
+
+                st.plotly_chart(fig_budget, use_container_width=True)
+
             st.subheader("Filtered Transactions")
             st.dataframe(
                 get_display_df(filtered_df),
@@ -352,60 +554,6 @@ if page == "Dashboard":
                 hide_index=True,
                 column_config=get_column_config()
             )
-            
-        st.divider()
-        st.subheader("Budget vs Actual Spending")
-
-        if budget_df.empty:
-            st.info("No budget goals set yet. Add budget goals from the Budget Goals page.")
-        else:
-            actual_spending = (
-                filtered_df[filtered_df["transaction_type"] == "expense"]
-                .groupby("category")["amount"]
-                .sum()
-                .reset_index()
-                .rename(columns={"amount": "actual_spending"})
-            )
-
-            budget_compare = budget_df.merge(
-                actual_spending,
-                on="category",
-                how="left"
-            )
-
-            budget_compare["actual_spending"] = budget_compare["actual_spending"].fillna(0)
-            budget_compare["remaining_budget"] = (
-                budget_compare["monthly_budget"] - budget_compare["actual_spending"]
-            )
-            budget_compare["usage_percent"] = (
-                budget_compare["actual_spending"] / budget_compare["monthly_budget"] * 100
-            ).round(2)
-
-            display_budget_compare = budget_compare[
-                ["category", "monthly_budget", "actual_spending", "remaining_budget", "usage_percent"]
-            ].copy()
-
-            display_budget_compare.insert(
-                0,
-                "No.",
-                range(1, len(display_budget_compare) + 1)
-            )
-
-            st.dataframe(
-                display_budget_compare,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            fig_budget = px.bar(
-                budget_compare,
-                x="category",
-                y=["monthly_budget", "actual_spending"],
-                barmode="group",
-                title="Budget vs Actual Spending"
-            )
-
-            st.plotly_chart(fig_budget, use_container_width=True)
 
 
 # =========================
@@ -437,7 +585,8 @@ elif page == "AI Quick Entry":
                     "category": parsed["category"],
                     "payment_method": parsed["payment_method"],
                     "source": "ai_text",
-                    "notes": quick_text
+                    "notes": quick_text,
+                    "user_id": user_id
                 }
 
                 similar_records = find_similar_transaction(record)
@@ -493,7 +642,8 @@ elif page == "Manual Entry":
                 "category": category,
                 "payment_method": payment_method,
                 "source": "manual",
-                "notes": "manual entry"
+                "notes": "manual entry",
+                "user_id": user_id
             }
 
             similar_records = find_similar_transaction(record)
@@ -518,7 +668,7 @@ elif page == "CSV / Excel Upload":
     )
 
     st.info("Required columns: date, description, amount, type, category")
-    
+
     sample_df = pd.DataFrame({
         "date": ["2026-05-20"],
         "description": ["Lunch"],
@@ -535,7 +685,7 @@ elif page == "CSV / Excel Upload":
             upload_df = pd.read_csv(uploaded_file)
         else:
             upload_df = pd.read_excel(uploaded_file)
-            
+
         missing_columns = validate_upload_columns(upload_df)
 
         if missing_columns:
@@ -557,7 +707,8 @@ elif page == "CSV / Excel Upload":
                     "category": str(row["category"]),
                     "payment_method": None,
                     "source": uploaded_file.name,
-                    "notes": "uploaded file"
+                    "notes": "uploaded file",
+                    "user_id": user_id
                 })
 
             new_records = []
@@ -576,6 +727,7 @@ elif page == "CSV / Excel Upload":
 
             st.success(f"Inserted {len(new_records)} new transactions.")
             st.warning(f"Skipped {len(possible_duplicates)} possible duplicates.")
+
 
 # =========================
 # Budget Goals
@@ -629,7 +781,8 @@ elif page == "Budget Goals":
             else:
                 insert_budget_goal({
                     "category": category,
-                    "monthly_budget": float(monthly_budget)
+                    "monthly_budget": float(monthly_budget),
+                    "user_id": user_id
                 })
 
                 st.success(f"Added {category} budget.")
@@ -648,17 +801,17 @@ elif page == "Budget Goals":
         if "id" in display_budget_df.columns:
             display_budget_df = display_budget_df.drop(columns=["id"])
 
-        display_budget_df.insert(
-            0,
-            "No.",
-            range(1, len(display_budget_df) + 1)
-        )
+        if "user_id" in display_budget_df.columns:
+            display_budget_df = display_budget_df.drop(columns=["user_id"])
+
+        display_budget_df.insert(0, "No.", range(1, len(display_budget_df) + 1))
 
         st.dataframe(
             display_budget_df,
             use_container_width=True,
             hide_index=True
         )
+
 
 # =========================
 # AI Budget Advice
