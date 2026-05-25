@@ -179,6 +179,12 @@ def delete_budget_goal(goal_id):
         .eq("id", goal_id)
         .execute()
     )
+    
+def validate_upload_columns(upload_df):
+    required_columns = ["date", "description", "amount", "type", "category"]
+    missing_columns = [col for col in required_columns if col not in upload_df.columns]
+
+    return missing_columns
 
 # =========================
 # Sidebar
@@ -512,12 +518,29 @@ elif page == "CSV / Excel Upload":
     )
 
     st.info("Required columns: date, description, amount, type, category")
+    
+    sample_df = pd.DataFrame({
+        "date": ["2026-05-20"],
+        "description": ["Lunch"],
+        "amount": [15.00],
+        "type": ["expense"],
+        "category": ["Food"]
+    })
+
+    st.write("Sample format:")
+    st.dataframe(sample_df, hide_index=True, use_container_width=True)
 
     if uploaded_file:
         if uploaded_file.name.endswith(".csv"):
             upload_df = pd.read_csv(uploaded_file)
         else:
             upload_df = pd.read_excel(uploaded_file)
+            
+        missing_columns = validate_upload_columns(upload_df)
+
+        if missing_columns:
+            st.error(f"Missing required columns: {', '.join(missing_columns)}")
+            st.stop()
 
         st.subheader("Preview")
         st.dataframe(upload_df, use_container_width=True)
