@@ -346,6 +346,60 @@ if page == "Dashboard":
                 hide_index=True,
                 column_config=get_column_config()
             )
+            
+        st.divider()
+        st.subheader("Budget vs Actual Spending")
+
+        if budget_df.empty:
+            st.info("No budget goals set yet. Add budget goals from the Budget Goals page.")
+        else:
+            actual_spending = (
+                filtered_df[filtered_df["transaction_type"] == "expense"]
+                .groupby("category")["amount"]
+                .sum()
+                .reset_index()
+                .rename(columns={"amount": "actual_spending"})
+            )
+
+            budget_compare = budget_df.merge(
+                actual_spending,
+                on="category",
+                how="left"
+            )
+
+            budget_compare["actual_spending"] = budget_compare["actual_spending"].fillna(0)
+            budget_compare["remaining_budget"] = (
+                budget_compare["monthly_budget"] - budget_compare["actual_spending"]
+            )
+            budget_compare["usage_percent"] = (
+                budget_compare["actual_spending"] / budget_compare["monthly_budget"] * 100
+            ).round(2)
+
+            display_budget_compare = budget_compare[
+                ["category", "monthly_budget", "actual_spending", "remaining_budget", "usage_percent"]
+            ].copy()
+
+            display_budget_compare.insert(
+                0,
+                "No.",
+                range(1, len(display_budget_compare) + 1)
+            )
+
+            st.dataframe(
+                display_budget_compare,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            fig_budget = px.bar(
+                budget_compare,
+                x="category",
+                y=["monthly_budget", "actual_spending"],
+                barmode="group",
+                title="Budget vs Actual Spending"
+            )
+
+            st.plotly_chart(fig_budget, use_container_width=True)
 
 
 # =========================
