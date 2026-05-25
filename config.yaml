@@ -1,7 +1,0 @@
-cookie:
-  expiry_days: 30
-  key: finance_agent_cookie_key
-  name: finance_agent_cookie
-
-credentials:
-  usernames: {}
