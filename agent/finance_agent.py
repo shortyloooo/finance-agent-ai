@@ -5,11 +5,16 @@ import streamlit as st
 from groq import Groq
 from dotenv import load_dotenv
 
+load_dotenv()
+
+
 def get_groq_client():
     api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
-    return Groq(api_key=api_key)
 
-load_dotenv()
+    if not api_key:
+        raise ValueError("Missing GROQ_API_KEY. Add it to .env locally and Streamlit Cloud secrets.")
+
+    return Groq(api_key=api_key)
 
 class FinanceState(TypedDict):
     total_income: float
@@ -80,10 +85,6 @@ def create_budget_plan_node(state: FinanceState):
         **state,
         "budget_plan": budget_plan
     }
-
-
-import ollama
-
 
 def generate_final_advice_node(state: FinanceState):
 
