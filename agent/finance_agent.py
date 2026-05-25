@@ -1,5 +1,15 @@
 from typing import TypedDict, List, Dict, Any
 from langgraph.graph import StateGraph, END
+import os
+import streamlit as st
+from groq import Groq
+from dotenv import load_dotenv
+
+def get_groq_client():
+    api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
+    return Groq(api_key=api_key)
+
+load_dotenv()
 
 class FinanceState(TypedDict):
     total_income: float
@@ -134,17 +144,21 @@ def generate_final_advice_node(state: FinanceState):
     - Avoid repeating the same point.
     """
 
-    response = ollama.chat(
-        model="phi3",
+    client = get_groq_client()
+
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
         messages=[
             {
                 "role": "user",
                 "content": prompt
             }
-        ]
+        ],
+        temperature=0.4,
+        max_tokens=700
     )
 
-    advice = response["message"]["content"]
+    advice = response.choices[0].message.content
 
     return {
         **state,

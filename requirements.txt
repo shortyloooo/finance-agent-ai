@@ -3,6 +3,6 @@ pandas
 plotly
 supabase
 python-dotenv
-ollama
+groq
 langgraph
 openpyxl
