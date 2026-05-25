@@ -255,78 +255,71 @@ def normalize_date(ai_date):
     except Exception:
         return str(today)
 
-
-def parse_transaction_text(user_text: str):
-    today = str(date.today())
-
-    amount = extract_amount_from_text(user_text)
-    transaction_type = detect_transaction_type(user_text)
-    payment_method = detect_payment_method(user_text)
-
+def get_ai_parsed_fields(user_text: str, today: str):
     prompt = f"""
-You are a finance transaction extraction engine.
+    You are a finance transaction extraction engine.
 
-Your task:
-Extract exactly ONE personal finance transaction from the user's text.
+    Your task:
+    Extract exactly ONE personal finance transaction from the user's text.
 
-User text:
-"{user_text}"
+    User text:
+    "{user_text}"
 
-Today's date:
-{today}
+    Today's date:
+    {today}
 
-Return ONLY valid JSON.
-Do not include explanation.
-Do not include markdown.
-Do not wrap the JSON in ```json.
-Do not add comments.
+    Return ONLY valid JSON.
+    Do not include explanation.
+    Do not include markdown.
+    Do not wrap the JSON in ```json.
+    Do not add comments.
 
-Required JSON format:
-{{
-  "transaction_date": "{today}",
-  "description": "short item or merchant name",
-  "category": "Others"
-}}
+    Required JSON format:
+    {{
+    "transaction_date": "{today}",
+    "description": "short item or merchant name",
+    "category": "Others"
+    }}
 
-Date rules:
-1. transaction_date must always be valid ISO format: YYYY-MM-DD.
-2. If the user says "today", use: {today}.
-3. If the user gives no date, use: {today}.
-4. If the date is unclear, use: {today}.
-5. Never return words like "end", "tomorrow", "yesterday", "next week", or "unknown" inside transaction_date.
-6. Never return invalid dates.
+    Date rules:
+    1. transaction_date must always be valid ISO format: YYYY-MM-DD.
+    2. If the user says "today", use: {today}.
+    3. If the user gives no date, use: {today}.
+    4. If the date is unclear, use: {today}.
+    5. Never return words like "end", "tomorrow", "yesterday", "next week", or "unknown" inside transaction_date.
+    6. Never return invalid dates.
 
-Description rules:
-1. Use a short clean description.
-2. Prefer the purchased item, merchant, or income source.
-3. Do not include payment method in description.
-4. Do not include amount in description.
-5. Do not include date in description.
+    Description rules:
+    1. Use a short clean description.
+    2. Prefer the purchased item, merchant, income source, or repayment source.
+    3. Do not include payment method in description.
+    4. Do not include amount in description.
+    5. Do not include date in description.
 
-Category rules:
-Choose exactly one category from this list:
-{", ".join(ALLOWED_CATEGORIES)}
+    Category rules:
+    Choose exactly one category from this list:
+    {", ".join(ALLOWED_CATEGORIES)}
 
-Category examples:
-- Food: lunch, dinner, breakfast, coffee, tea, milk tea, restaurant, cafe, groceries, GrabFood
-- Transport: petrol, fuel, toll, parking, Grab ride, taxi, bus, train, MRT, LRT
-- Salary: salary, payroll, wage, bonus, commission, allowance
-- Shopping: clothes, shoes, bag, Shopee, Lazada, electronics, accessories
-- Bills: rent, electricity, water, internet, phone bill, insurance, subscription
-- Entertainment: movie, cinema, Netflix, Spotify, games, concert
-- Health: clinic, hospital, doctor, medicine, pharmacy, gym
-- Education: course, book, tuition, exam, university, certification
-- Investment: stock, ETF, crypto, dividend, interest
-- Transfer: transfer to friend, bank transfer, DuitNow transfer
-- Reimbursement: paid me back, transferred me back, reimbursed me, split bill repayment
-- Others: use only if none of the above clearly match
+    Category examples:
+    - Food: lunch, dinner, breakfast, coffee, tea, milk tea, restaurant, cafe, groceries, GrabFood
+    - Transport: petrol, fuel, toll, parking, Grab ride, taxi, bus, train, MRT, LRT
+    - Salary: salary, payroll, wage, bonus, commission, allowance
+    - Shopping: clothes, shoes, bag, Shopee, Lazada, electronics, accessories
+    - Bills: rent, electricity, water, internet, phone bill, insurance, subscription
+    - Entertainment: movie, cinema, Netflix, Spotify, games, concert
+    - Health: clinic, hospital, doctor, medicine, pharmacy, gym
+    - Education: course, book, tuition, exam, university, certification
+    - Investment: stock, ETF, crypto, dividend, interest
+    - Transfer: transfer to friend, bank transfer, DuitNow transfer
+    - Reimbursement: paid me back, transferred me back, reimbursed me, split bill repayment
+    - Others: use only if none of the above clearly match
 
-Important:
-- Do not guess extra details.
-- Do not create multiple transactions.
-- Do not return amount, transaction_type, or payment_method.
-- Python code will handle amount, transaction_type, and payment_method separately.
-"""
+    Important:
+    - Do not guess extra details.
+    - Do not create multiple transactions.
+    - Do not return amount, transaction_type, or payment_method.
+    - Python code will handle amount, transaction_type, and payment_method separately.
+    """
 
     try:
         response = ollama.chat(
@@ -336,10 +329,19 @@ Important:
 
         content = response["message"]["content"].strip()
         json_text = extract_json_from_text(content)
-        parsed = json.loads(json_text)
+        return json.loads(json_text)
 
     except Exception:
-        parsed = {}
+        return {}
+
+def parse_transaction_text(user_text: str):
+    today = str(date.today())
+
+    amount = extract_amount_from_text(user_text)
+    transaction_type = detect_transaction_type(user_text)
+    payment_method = detect_payment_method(user_text)
+
+    parsed = get_ai_parsed_fields(user_text, today)
 
     final_result = {
         "transaction_date": normalize_date(parsed.get("transaction_date")),
