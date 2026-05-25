@@ -19,6 +19,23 @@ st.set_page_config(
 )
 
 
+st.markdown("""
+<style>
+div[data-testid="stFormSubmitButton"] button[kind="primary"] {
+    background-color: #16a34a;
+    border-color: #16a34a;
+    color: white;
+}
+
+div[data-testid="stFormSubmitButton"] button[kind="secondary"] {
+    background-color: #dc2626;
+    border-color: #dc2626;
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # =========================
 # Helper Functions
 # =========================
@@ -37,6 +54,15 @@ def insert_transaction(record):
     return supabase.table("transactions").insert(record).execute()
 
 
+def update_transaction(transaction_id, record):
+    return (
+        supabase.table("transactions")
+        .update(record)
+        .eq("id", transaction_id)
+        .execute()
+    )
+
+
 def delete_transaction(transaction_id):
     return (
         supabase.table("transactions")
@@ -46,43 +72,30 @@ def delete_transaction(transaction_id):
     )
 
 
+def find_similar_transaction(record):
+    response = (
+        supabase.table("transactions")
+        .select("*")
+        .eq("transaction_date", record["transaction_date"])
+        .eq("description", record["description"])
+        .eq("amount", record["amount"])
+        .eq("transaction_type", record["transaction_type"])
+        .execute()
+    )
+    return response.data
+
+
 def prepare_dataframe(transactions):
     df = pd.DataFrame(transactions) if transactions else pd.DataFrame()
 
     if not df.empty:
         df["transaction_date"] = pd.to_datetime(df["transaction_date"], errors="coerce")
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+        df["transaction_type"] = df["transaction_type"].apply(normalize_transaction_type)
 
     return df
 
 
-def get_column_config():
-    return {
-        "No.": st.column_config.NumberColumn(
-            "No.",
-            width=60
-        ),
-        "category": st.column_config.TextColumn(
-            "Category",
-            width="medium"
-        ),
-        "amount": st.column_config.NumberColumn(
-            "Amount",
-            width="small",
-            format="RM %.2f"
-        )
-    }
-    
-    
-def update_transaction(transaction_id, record):
-    return (
-        supabase.table("transactions")
-        .update(record)
-        .eq("id", transaction_id)
-        .execute()
-    )
-    
-    
 def normalize_transaction_type(value):
     value = str(value).lower().strip()
 
@@ -93,6 +106,14 @@ def normalize_transaction_type(value):
         return "income"
 
     return "expense"
+
+
+def get_column_config():
+    return {
+        "No.": st.column_config.NumberColumn("No.", width=60),
+        "category": st.column_config.TextColumn("Category", width="medium"),
+        "amount": st.column_config.NumberColumn("Amount", width="small", format="RM %.2f")
+    }
 
 
 def get_display_df(df):
@@ -200,31 +221,6 @@ if page == "Dashboard":
             (db_df["transaction_date"].dt.date >= start_date) &
             (db_df["transaction_date"].dt.date <= end_date)
         ]
-        
-        st.subheader("Monthly Income vs Expense Trend")
-
-        trend_df = filtered_df.copy()
-        trend_df["month"] = trend_df["transaction_date"].dt.to_period("M").astype(str)
-
-        monthly_summary = (
-            trend_df.groupby(["month", "transaction_type"])["amount"]
-            .sum()
-            .reset_index()
-        )
-
-        if not monthly_summary.empty:
-            fig_trend = px.bar(
-                monthly_summary,
-                x="month",
-                y="amount",
-                color="transaction_type",
-                barmode="group",
-                title="Monthly Income vs Expense"
-            )
-
-            st.plotly_chart(fig_trend, use_container_width=True)
-        else:
-            st.info("No monthly trend data available.")
 
         if transaction_filter != "All":
             filtered_df = filtered_df[
@@ -248,6 +244,32 @@ if page == "Dashboard":
             col1.metric("Total Income", f"RM {total_income:,.2f}")
             col2.metric("Total Expense", f"RM {total_expense:,.2f}")
             col3.metric("Balance", f"RM {balance:,.2f}")
+
+            st.divider()
+
+            st.subheader("Monthly Income vs Expense Trend")
+
+            trend_df = filtered_df.copy()
+            trend_df["month"] = trend_df["transaction_date"].dt.to_period("M").astype(str)
+
+            monthly_summary = (
+                trend_df.groupby(["month", "transaction_type"])["amount"]
+                .sum()
+                .reset_index()
+            )
+
+            if not monthly_summary.empty:
+                fig_trend = px.bar(
+                    monthly_summary,
+                    x="month",
+                    y="amount",
+                    color="transaction_type",
+                    barmode="group",
+                    title="Monthly Income vs Expense"
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.info("No monthly trend data available.")
 
             st.divider()
 
@@ -287,7 +309,8 @@ if page == "Dashboard":
             st.dataframe(
                 get_display_df(filtered_df),
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                column_config=get_column_config()
             )
 
 
@@ -316,15 +339,23 @@ elif page == "AI Quick Entry":
                     "transaction_date": parsed["transaction_date"],
                     "description": parsed["description"],
                     "amount": float(parsed["amount"]),
-                    "transaction_type": parsed["transaction_type"],
+                    "transaction_type": normalize_transaction_type(parsed["transaction_type"]),
                     "category": parsed["category"],
                     "payment_method": parsed["payment_method"],
                     "source": "ai_text",
                     "notes": quick_text
                 }
 
-                insert_transaction(record)
-                display_transaction_card(parsed)
+                similar_records = find_similar_transaction(record)
+
+                if similar_records:
+                    st.warning("A similar transaction already exists. This may be a duplicate.")
+                    insert_transaction(record)
+                    st.info("Saved anyway because repeated expenses can be valid.")
+                    display_transaction_card(parsed)
+                else:
+                    insert_transaction(record)
+                    display_transaction_card(parsed)
 
             except Exception as e:
                 st.error("Failed to parse or save transaction.")
@@ -371,6 +402,11 @@ elif page == "Manual Entry":
                 "notes": "manual entry"
             }
 
+            similar_records = find_similar_transaction(record)
+
+            if similar_records:
+                st.warning("A similar transaction exists, but manual entries are still saved.")
+
             insert_transaction(record)
             st.success("Manual transaction saved successfully!")
 
@@ -406,15 +442,29 @@ elif page == "CSV / Excel Upload":
                     "transaction_date": str(row["date"]),
                     "description": str(row["description"]),
                     "amount": float(row["amount"]),
-                    "transaction_type": str(row["type"]),
+                    "transaction_type": normalize_transaction_type(row["type"]),
                     "category": str(row["category"]),
                     "payment_method": None,
                     "source": uploaded_file.name,
                     "notes": "uploaded file"
                 })
 
-            supabase.table("transactions").insert(records).execute()
-            st.success(f"Inserted {len(records)} transactions successfully!")
+            new_records = []
+            possible_duplicates = []
+
+            for record in records:
+                similar_records = find_similar_transaction(record)
+
+                if similar_records:
+                    possible_duplicates.append(record)
+                else:
+                    new_records.append(record)
+
+            if new_records:
+                supabase.table("transactions").insert(new_records).execute()
+
+            st.success(f"Inserted {len(new_records)} new transactions.")
+            st.warning(f"Skipped {len(possible_duplicates)} possible duplicates.")
 
 
 # =========================
@@ -569,13 +619,15 @@ elif page == "Transactions":
                 with action_col1:
                     save_edit = st.form_submit_button(
                         "Save Changes",
-                        use_container_width=True
+                        use_container_width=True,
+                        type="primary"
                     )
 
                 with action_col2:
                     delete_selected = st.form_submit_button(
                         "Delete Transaction",
-                        use_container_width=True
+                        use_container_width=True,
+                        type="secondary"
                     )
 
                 if save_edit:
