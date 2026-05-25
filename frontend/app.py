@@ -149,6 +149,36 @@ def display_transaction_card(parsed):
     if parsed.get("payment_method"):
         st.write(f"**Payment Method:** {parsed['payment_method']}")
 
+def load_budget_goals():
+    response = (
+        supabase.table("budget_goals")
+        .select("*")
+        .order("category")
+        .execute()
+    )
+    return response.data
+
+
+def insert_budget_goal(record):
+    return supabase.table("budget_goals").insert(record).execute()
+
+
+def update_budget_goal(goal_id, record):
+    return (
+        supabase.table("budget_goals")
+        .update(record)
+        .eq("id", goal_id)
+        .execute()
+    )
+
+
+def delete_budget_goal(goal_id):
+    return (
+        supabase.table("budget_goals")
+        .delete()
+        .eq("id", goal_id)
+        .execute()
+    )
 
 # =========================
 # Sidebar
@@ -163,6 +193,7 @@ page = st.sidebar.radio(
         "AI Quick Entry",
         "Manual Entry",
         "CSV / Excel Upload",
+        "Budget Goals",
         "AI Budget Advice",
         "Transactions"
     ]
@@ -180,6 +211,9 @@ st.sidebar.caption(
 
 transactions = load_transactions()
 db_df = prepare_dataframe(transactions)
+
+budget_goals = load_budget_goals()
+budget_df = pd.DataFrame(budget_goals) if budget_goals else pd.DataFrame()
 
 st.title("Finance Agent AI")
 st.caption("Track income, expenses, spending categories, and get budgeting advice.")
@@ -466,6 +500,88 @@ elif page == "CSV / Excel Upload":
             st.success(f"Inserted {len(new_records)} new transactions.")
             st.warning(f"Skipped {len(possible_duplicates)} possible duplicates.")
 
+# =========================
+# Budget Goals
+# =========================
+
+elif page == "Budget Goals":
+    st.header("🎯 Budget Goals")
+
+    st.subheader("Set Monthly Budget")
+
+    with st.form("budget_goal_form"):
+        category = st.selectbox(
+            "Category",
+            [
+                "Food",
+                "Transport",
+                "Shopping",
+                "Bills",
+                "Entertainment",
+                "Health",
+                "Education",
+                "Investment",
+                "Others"
+            ]
+        )
+
+        monthly_budget = st.number_input(
+            "Monthly Budget (RM)",
+            min_value=0.0,
+            format="%.2f"
+        )
+
+        save_budget = st.form_submit_button(
+            "Save Budget Goal",
+            use_container_width=True
+        )
+
+        if save_budget:
+            existing = budget_df[
+                budget_df["category"] == category
+            ] if not budget_df.empty else pd.DataFrame()
+
+            if not existing.empty:
+                goal_id = int(existing.iloc[0]["id"])
+
+                update_budget_goal(goal_id, {
+                    "monthly_budget": float(monthly_budget)
+                })
+
+                st.success(f"Updated {category} budget.")
+            else:
+                insert_budget_goal({
+                    "category": category,
+                    "monthly_budget": float(monthly_budget)
+                })
+
+                st.success(f"Added {category} budget.")
+
+            st.rerun()
+
+    st.divider()
+
+    st.subheader("Current Budget Goals")
+
+    if budget_df.empty:
+        st.info("No budget goals set yet.")
+    else:
+        display_budget_df = budget_df.copy()
+
+        if "id" in display_budget_df.columns:
+            display_budget_df = display_budget_df.drop(columns=["id"])
+
+        display_budget_df.insert(
+            0,
+            "No.",
+            range(1, len(display_budget_df) + 1)
+        )
+
+        st.dataframe(
+            display_budget_df,
+            use_container_width=True,
+            hide_index=True
+        )
 
 # =========================
 # AI Budget Advice
