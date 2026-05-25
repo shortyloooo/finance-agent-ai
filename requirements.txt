@@ -6,3 +6,4 @@ python-dotenv
 ollama
 langgraph
 openpyxl
+extra-streamlit-components

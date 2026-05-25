@@ -1,6 +1,7 @@
 import sys
 import os
 from datetime import date, timedelta
+import extra_streamlit_components as stx
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -19,6 +20,7 @@ st.set_page_config(
     layout="wide"
 )
 
+cookie_manager = stx.CookieManager()
 
 # =========================
 # CSS
@@ -82,14 +84,34 @@ def delete_previous_month_transactions(user_id):
     )
 
 def restore_auth_session():
-    if "access_token" in st.session_state and "refresh_token" in st.session_state:
+    if "user" in st.session_state:
+        return
+
+    access_token = cookie_manager.get("finance_access_token")
+    refresh_token = cookie_manager.get("finance_refresh_token")
+
+    if access_token and refresh_token:
         try:
-            supabase.auth.set_session(
-                st.session_state["access_token"],
-                st.session_state["refresh_token"]
+            session = supabase.auth.set_session(access_token, refresh_token)
+
+            st.session_state["user"] = session.user
+            st.session_state["access_token"] = access_token
+            st.session_state["refresh_token"] = refresh_token
+            cookie_manager.set(
+                "finance_access_token",
+                response.session.access_token,
+                max_age=60 * 60 * 24 * 30
             )
+
+            cookie_manager.set(
+                "finance_refresh_token",
+                response.session.refresh_token,
+                max_age=60 * 60 * 24 * 30
+            )
+
         except Exception:
-            pass
+            cookie_manager.delete("finance_access_token")
+            cookie_manager.delete("finance_refresh_token")
 
 
 def auth_page():
@@ -344,6 +366,10 @@ st.sidebar.caption(f"Logged in as: {user.email}")
 
 if st.sidebar.button("Logout", use_container_width=True):
     supabase.auth.sign_out()
+
+    cookie_manager.delete("finance_access_token")
+    cookie_manager.delete("finance_refresh_token")
+
     st.session_state.clear()
     st.rerun()
 
