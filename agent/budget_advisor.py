@@ -1,5 +1,3 @@
-import ollama
-
 def generate_budget_advice(total_income, total_expense, balance, category_summary):
     category_text = category_summary.head(10).to_string(index=False)
     prompt = f"""
